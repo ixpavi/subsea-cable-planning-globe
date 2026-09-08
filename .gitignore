@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+scripts/.cache/
+scripts/research/.cache/
+
+# 30 MB NASA source image, re-downloadable by scripts/build-earth-texture.py.
+# The derived textures in public/textures/ ARE committed so the app works
+# from a clean clone without running the build script.
+scripts/.cache-earth-source.jpg
+scripts/research/.cache/
+
+.vercel
+
+# LaTeX build artifacts. main.pdf and main.bbl ARE committed: the PDF is the
+# deliverable, and IEEE submission wants the .bbl because they do not run
+# bibtex for you. Everything below regenerates from a single build.
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.blg
+docs/paper/*.fls
+docs/paper/*.fdb_latexmk
+docs/paper/*.synctex.gz
+
+# NOAA strips cached by build-ocean-depth-grid.mjs. ~6 MB, re-fetchable.
+scripts/.cache-depth-strips/
