@@ -31,6 +31,14 @@ interface Props {
   onSelectRoute: (id: RoutingProfileId | null) => void;
   onRouteResult: (result: RouteEngineResult | null) => void;
   onClose: () => void;
+  /**
+   * The real cable systems already serving this pair of endpoints, when the
+   * host app computes a connectivity analysis. Optional: a host that does not
+   * run one passes neither of these and the hand-off below is not rendered.
+   */
+  relevantCableIds?: string[];
+  /** Leaves planning mode for the cable explorer, scoped to those cables. */
+  onExploreCables?: (cableIds: string[]) => void;
 }
 
 export default function PlanningPanel({
@@ -42,6 +50,8 @@ export default function PlanningPanel({
   onSelectRoute,
   onRouteResult,
   onClose,
+  relevantCableIds,
+  onExploreCables,
 }: Props) {
   // Weights are fixed at the engine's documented defaults. They are held as a
   // constant rather than exposed as sliders because every change restarts a
@@ -164,8 +174,20 @@ export default function PlanningPanel({
           )}
         </Stage>
 
+        {relevantCableIds && relevantCableIds.length > 0 && onExploreCables && (
+          <Stage num={4} title="What already serves this route">
+            <p className="plan-hint">
+              {relevantCableIds.length} real cable {relevantCableIds.length === 1 ? "system" : "systems"} already
+              connect these endpoints. A new build competes with them, so they are worth reading before costing one.
+            </p>
+            <button type="button" className="plan-clear" onClick={() => onExploreCables(relevantCableIds)}>
+              Explore those cables
+            </button>
+          </Stage>
+        )}
+
         {source && (
-          <Stage num={4} title="Size the facility">
+          <Stage num={relevantCableIds && relevantCableIds.length > 0 && onExploreCables ? 5 : 4} title="Size the facility">
             <CalculatorPanel
               siteName={source.label}
               siteLocation={formatCoords(source.lat, source.lng)}
@@ -238,20 +260,100 @@ function Endpoint({
  * whether that point is a real landing point or one the engine invented.
  */
 function EndpointNote({ result }: { result: RouteEngineResult }) {
-  const ends = [
-    { role: "Source", endpoint: result.sourceEndpoint },
-    { role: "Destination", endpoint: result.destinationEndpoint },
-  ];
   return (
-    <p className="plan-note">
-      {ends.map(({ role, endpoint }) => (
-        <span key={role}>
-          {role} marine access: {endpoint.note}
-          {endpoint.terrestrialAccessKm != null &&
-            ` (${Math.round(endpoint.terrestrialAccessKm)} km overland from the site).`}
-          <br />
-        </span>
-      ))}
-    </p>
+    <>
+      <EndpointBasis role="Source" endpoint={result.sourceEndpoint} />
+      <EndpointBasis role="Destination" endpoint={result.destinationEndpoint} />
+    </>
+  );
+}
+
+/**
+ * Why this marine access point, and where it is.
+ *
+ * A cable does not land at a city, and for an inland site the engine may put
+ * the access point on a different coast from the nearest landing point --
+ * Bangalore resolves toward the Arabian Sea while its nearest landing point,
+ * Chennai, is on the Bay of Bengal. Shown a marker with no explanation, that
+ * reads as "the app chose Kochi". These fields state what was chosen, where it
+ * is, and what it beat, so the choice is auditable instead of mysterious.
+ */
+function EndpointBasis({ role, endpoint }: { role: string; endpoint: RouteEngineResult["sourceEndpoint"] }) {
+  const isReal = endpoint.kind === "real-landing-point";
+  const km = (v: number) => `${Math.round(v).toLocaleString()} km`;
+
+  return (
+    <div className="plan-endpoint">
+      <div className="plan-endpoint-head">
+        <span className="plan-metric-key">{role} marine access</span>
+        <span className="plan-modeled-tag">{isReal ? "REAL DATA" : "MODELLED"}</span>
+      </div>
+
+      <dl className="plan-endpoint-basis">
+        <dt>Chosen</dt>
+        <dd>
+          {isReal ? (
+            <>Real landing point &mdash; {endpoint.landingPointName}</>
+          ) : endpoint.kind === "modeled-access-point" ? (
+            <>Modelled ocean cell (no landing point used)</>
+          ) : (
+            <>None &mdash; routing cannot start here</>
+          )}
+        </dd>
+
+        {endpoint.lat != null && endpoint.lng != null && (
+          <>
+            <dt>Position</dt>
+            <dd className="plan-endpoint-mono">
+              {endpoint.lat.toFixed(2)}, {endpoint.lng.toFixed(2)}
+            </dd>
+          </>
+        )}
+
+        {endpoint.terrestrialAccessKm != null && (
+          <>
+            <dt>Overland</dt>
+            <dd>
+              {km(endpoint.terrestrialAccessKm)} from {endpoint.businessLabel}
+            </dd>
+          </>
+        )}
+
+        {!isReal && endpoint.localityReference && (
+          <>
+            <dt>Whereabouts</dt>
+            <dd>
+              coast near {endpoint.localityReference.name} ({km(endpoint.localityReference.distanceKm)} away) &mdash; a
+              locality reference only, not a cable landing
+            </dd>
+          </>
+        )}
+
+        {endpoint.nearestLandingPoint && endpoint.selection.rule !== "shorter-total-connection" && (
+          <>
+            <dt>Nearest landing point</dt>
+            <dd>
+              {endpoint.nearestLandingPoint.name} ({km(endpoint.nearestLandingPoint.distanceKm)})
+              {!isReal && <> &mdash; beyond the {km(endpoint.searchRadiusKm)} radius, so not used</>}
+            </dd>
+          </>
+        )}
+
+        {/* When two access points were actually routed against each other, the
+            measurement decided it -- not the radius rule. Show the numbers. */}
+        {endpoint.selection.rejected && endpoint.selection.totalConnectionKm != null && (
+          <>
+            <dt>Decided by</dt>
+            <dd>
+              shorter total connection &mdash; {km(endpoint.selection.totalConnectionKm)} here against{" "}
+              {km(endpoint.selection.rejected.totalConnectionKm)} via {endpoint.selection.rejected.label} (
+              {km(endpoint.selection.rejected.terrestrialAccessKm)} overland)
+            </dd>
+          </>
+        )}
+      </dl>
+
+      <p className="plan-note">{endpoint.note}</p>
+    </div>
   );
 }

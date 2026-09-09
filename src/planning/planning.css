@@ -590,3 +590,50 @@
     max-height: 62dvh;
   }
 }
+
+/* ============================================================
+   Marine access point: what was chosen, where, and what it beat.
+   ============================================================ */
+
+.plan-endpoint {
+  border-top: 1px solid var(--dc-border);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.plan-endpoint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* Two columns so the label and its value stay aligned down the card and the
+   rejected option is scannable next to the chosen one. */
+.plan-endpoint-basis {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0 0 6px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.plan-endpoint-basis dt {
+  color: var(--dc-text-dim);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding-top: 1px;
+  white-space: nowrap;
+}
+
+.plan-endpoint-basis dd {
+  margin: 0;
+  color: var(--dc-text);
+}
+
+.plan-endpoint-mono {
+  font-family: var(--dc-font-mono);
+}
