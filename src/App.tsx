@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Globe from "./Globe";
-import type { GlobeApi } from "./Globe";
+import type { GlobeApi, PlanningMarker } from "./Globe";
 import Legend from "./Legend";
 import DetailPanel from "./DetailPanel";
 import NetworkSearch from "./explore/NetworkSearch";
 import CableDirectory from "./explore/CableDirectory";
 import NetworkInspector from "./explore/NetworkInspector";
 import CableChooser from "./explore/CableChooser";
+import PlanningPanel from "./planning/PlanningPanel";
+import type { PlannedLocation } from "./planning/planningTypes";
+import type { RouteEngineResult, RoutingProfileId } from "./routing/routingTypes";
 import { buildCableNetworkIndex, getCableDetail } from "./cableNetwork";
 import { frameForPoints } from "./cameraFraming";
 import type { NetworkSelection } from "./cableNetwork";
@@ -46,6 +49,15 @@ export default function App() {
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [cableChoices, setCableChoices] = useState<CableHitCandidate[] | null>(null);
 
+  // Planning-mode state. It lives here rather than inside PlanningPanel
+  // because the globe is the other half of this feature: it draws the two
+  // endpoints, the candidate corridors, and frames the camera on them.
+  const [planningMode, setPlanningMode] = useState(false);
+  const [planningSource, setPlanningSource] = useState<PlannedLocation | null>(null);
+  const [planningDestination, setPlanningDestination] = useState<PlannedLocation | null>(null);
+  const [routeEngineResult, setRouteEngineResult] = useState<RouteEngineResult | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<RoutingProfileId | null>(null);
+
   useEffect(() => {
     Promise.all([
       fetchJSON<CableFeature[]>(assetUrl("data/cables.json")),
@@ -75,13 +87,13 @@ export default function App() {
    *  the route doesn't disappear around the globe's curve, without zooming so far
    *  out the highlight is imperceptible. Geometry lives in cameraFraming.ts so
    *  the antimeridian handling is directly testable. */
-  function focusOnPoints(points: [number, number][]) {
+  const focusOnPoints = useCallback((points: [number, number][]) => {
     const api = globeApiRef.current;
     if (!api) return;
     const framing = frameForPoints(points);
     if (!framing) return;
     api.flyTo(framing.lat, framing.lng, framing.altitude);
-  }
+  }, []);
 
   function handleSelectNetworkItem(sel: NetworkSelection) {
     setSelected(null);
@@ -115,6 +127,85 @@ export default function App() {
     handleSelectNetworkItem({ kind: "cable", cableId });
   }
 
+  function enterPlanningMode() {
+    // Explore-mode surfaces are dismissed rather than left underneath: the
+    // planning panel docks to the same right edge as the inspector, and two
+    // stacked panels would each be describing a different thing.
+    setSelected(null);
+    setNetworkSelection(null);
+    setDirectoryOpen(false);
+    setCableChoices(null);
+    setRotating(false);
+    setPlanningMode(true);
+  }
+
+  function leavePlanningMode() {
+    setPlanningMode(false);
+    setSelectedRouteId(null);
+  }
+
+  /** Endpoints as globe markers. The proposed route's own marine endpoints are
+   *  drawn separately by Globe from the engine result -- these two are the
+   *  business locations, which are inland far more often than not. */
+  const planningMarkers = useMemo<PlanningMarker[]>(() => {
+    const markers: PlanningMarker[] = [];
+    if (planningSource) {
+      markers.push({
+        id: "planning-source",
+        kind: "location",
+        lat: planningSource.lat,
+        lng: planningSource.lng,
+        label: planningSource.label,
+        sublabel: "SITE",
+      });
+    }
+    if (planningDestination) {
+      markers.push({
+        id: "planning-destination",
+        kind: "destination",
+        lat: planningDestination.lat,
+        lng: planningDestination.lng,
+        label: planningDestination.label,
+        sublabel: "DESTINATION",
+      });
+    }
+    return markers;
+  }, [planningSource, planningDestination]);
+
+  const planningConnectivity = useMemo(
+    () =>
+      planningSource && planningDestination
+        ? {
+            lat1: planningSource.lat,
+            lng1: planningSource.lng,
+            lat2: planningDestination.lat,
+            lng2: planningDestination.lng,
+          }
+        : null,
+    [planningSource, planningDestination]
+  );
+
+  // Frame both endpoints as soon as the pair exists, so the user sees the
+  // span the engine is about to search rather than wherever the globe
+  // happened to be pointing.
+  useEffect(() => {
+    if (!planningMode || !planningSource || !planningDestination) return;
+    focusOnPoints([
+      [planningSource.lat, planningSource.lng],
+      [planningDestination.lat, planningDestination.lng],
+    ]);
+  }, [planningMode, planningSource, planningDestination, focusOnPoints]);
+
+  // Stable identity: PlanningPanel reports every engine result through this,
+  // and an inline closure would re-fire its effect on every render.
+  const handleRouteResult = useCallback((result: RouteEngineResult | null) => {
+    setRouteEngineResult(result);
+  }, []);
+
+  const handleSelectRoute = useCallback((id: RoutingProfileId | null) => {
+    setSelectedRouteId(id);
+  }, []);
+
   return (
     <div className="app-root">
       <header className="title-bar">
@@ -144,15 +235,23 @@ export default function App() {
             networkSelection={networkSelection}
             onSelectNetworkItem={handleSelectNetworkItem}
             onAmbiguousCableClick={handleAmbiguousCableClick}
+            planningMode={planningMode}
+            planningMarkers={planningMarkers}
+            planningConnectivity={planningConnectivity}
+            routeEngineResult={routeEngineResult}
+            selectedRouteCandidateId={selectedRouteId}
+            onSelectRouteCandidate={handleSelectRoute}
           />
 
-          <NetworkSearch
-            index={cableNetworkIndex}
-            onSelectCable={(id) => handleSelectNetworkItem({ kind: "cable", cableId: id })}
-            onSelectLandingPoint={(id) =>
-              handleSelectNetworkItem({ kind: "landingPoint", landingPointId: id })
-            }
-          />
+          {!planningMode && (
+            <NetworkSearch
+              index={cableNetworkIndex}
+              onSelectCable={(id) => handleSelectNetworkItem({ kind: "cable", cableId: id })}
+              onSelectLandingPoint={(id) =>
+                handleSelectNetworkItem({ kind: "landingPoint", landingPointId: id })
+              }
+            />
+          )}
 
           <div className="top-toolbar">
             {/* Layers lives inside the toolbar rather than beside it so that on a
@@ -178,18 +277,42 @@ export default function App() {
             >
               {rotating ? "⏸" : "▶"}
             </button>
+            {!planningMode && (
+              <button
+                className={`toolbar-btn ${directoryOpen ? "active" : ""}`}
+                onClick={() => setDirectoryOpen((v) => !v)}
+                title="Browse the full cable directory"
+              >
+                Directory
+              </button>
+            )}
             <button
-              className={`toolbar-btn ${directoryOpen ? "active" : ""}`}
-              onClick={() => setDirectoryOpen((v) => !v)}
-              title="Browse the full cable directory"
+              className={`toolbar-btn ${planningMode ? "active" : ""}`}
+              onClick={() => (planningMode ? leavePlanningMode() : enterPlanningMode())}
+              title="Plan a hypothetical facility and its subsea route"
             >
-              Directory
+              Plan
             </button>
           </div>
 
-          {selected && <DetailPanel selection={selected} onClose={() => setSelected(null)} />}
+          {planningMode && (
+            <PlanningPanel
+              source={planningSource}
+              destination={planningDestination}
+              onSetSource={setPlanningSource}
+              onSetDestination={setPlanningDestination}
+              selectedRouteId={selectedRouteId}
+              onSelectRoute={handleSelectRoute}
+              onRouteResult={handleRouteResult}
+              onClose={leavePlanningMode}
+            />
+          )}
 
-          {cableChoices && (
+          {!planningMode && selected && (
+            <DetailPanel selection={selected} onClose={() => setSelected(null)} />
+          )}
+
+          {!planningMode && cableChoices && (
             <CableChooser
               candidates={cableChoices}
               onChoose={handleChooseCable}
@@ -197,7 +320,7 @@ export default function App() {
             />
           )}
 
-          {!cableChoices && directoryOpen && (
+          {!planningMode && !cableChoices && directoryOpen && (
             <CableDirectory
               index={cableNetworkIndex}
               onSelectCable={(id) => handleSelectNetworkItem({ kind: "cable", cableId: id })}
@@ -205,7 +328,7 @@ export default function App() {
             />
           )}
 
-          {!cableChoices && !directoryOpen && networkSelection && (
+          {!planningMode && !cableChoices && !directoryOpen && networkSelection && (
             <NetworkInspector
               selection={networkSelection}
               index={cableNetworkIndex}
